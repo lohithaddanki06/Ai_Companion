@@ -1,0 +1,4 @@
+python-telegram-bot
+supabase
+openai
+python-dotenv
