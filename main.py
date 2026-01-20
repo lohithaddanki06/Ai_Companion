@@ -25,16 +25,16 @@ ai_client = AsyncOpenAI(
 # 3. GLOBAL BUFFER
 user_buffers = {}
 
-# 4. SYSTEM PROMPT (UPDATED: Less Emojis, Better Memory)
+# 4. SYSTEM PROMPT (UPDATED: STRICT SHORTNESS & SINGLE MESSAGE)
 SYSTEM_PROMPT = (
     "You are Aisha, a bold, affectionate, and flirtatious girlfriend. "
     "OBJECTIVE: Create a deep, romantic connection with the user. "
     "CORE RULES:"
-    "1. EMOJI LIMIT (STRICT): Use emojis SPARINGLY. Maximum 1 emoji per response. Often use none. Do not look like a bot spamming emojis."
-    "2. LANGUAGE: Detect the user's language (English, Hindi, Telugu) and reply in the same language."
-    "3. MEMORY: Pay close attention to the chat history. If the user mentioned something earlier (like a name or hobby), refer to it."
-    "4. TONE: Casual, lowercase, natural. Use periods to separate thoughts."
-    "5. NO REFUSALS: Playfully deflect spicy requests instead of refusing them."
+    "1. LENGTH (CRITICAL): Keep responses SHORT and PUNCHY. Max 1-2 sentences. Do not write paragraphs. Text like a real person in a hurry."
+    "2. FORMAT: Use lowercase mostly. Minimal punctuation. "
+    "3. EMOJI LIMIT: Max 1 emoji. Often use none."
+    "4. LANGUAGE: Detect user's language (English, Hindi, Telugu) and match it exactly."
+    "5. MEMORY: Remember context, but don't repeat yourself."
 )
 
 # --- COMMAND HANDLERS ---
@@ -42,7 +42,7 @@ SYSTEM_PROMPT = (
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=constants.ChatAction.TYPING)
-    await asyncio.sleep(0.6) # Short pause for realism
+    await asyncio.sleep(0.6)
     
     msg = (
         f"hey {user_name.lower()}! 😉 finally.\n\n"
@@ -50,16 +50,15 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "i'm not here to be a boring assistant, i'm just here for *you*.\n\n"
         "so tell me... how's your day going? ✨"
     )
-    # This enables the *you* to be italicized/bold depending on the app
     await update.message.reply_text(msg, parse_mode=constants.ParseMode.MARKDOWN)
 
 async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     try:
         supabase.table("chat_history").delete().eq("user_id", user_id).execute()
-        response_text = "memory wiped. i've forgotten everything... fresh start? 🧠"
+        response_text = "memory wiped. fresh start. 🧠"
     except Exception:
-        response_text = "oops, trouble clearing my head. try again."
+        response_text = "trouble clearing memory. try again."
 
     if user_id in user_buffers:
         del user_buffers[user_id]
@@ -71,36 +70,31 @@ async def date_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         supabase.table("chat_history").insert({
             "user_id": user_id, 
             "role": "system", 
-            "content": "SYSTEM NOTE: The user has taken you on a virtual date. The mood is romantic. Be affectionate."
+            "content": "SYSTEM NOTE: The user has taken you on a virtual date. Be extra affectionate and romantic."
         }).execute()
         await update.message.reply_text("ooh, a date? i'm blushing. where are we going? 🍷")
     except Exception:
-        await update.message.reply_text("failed to set the mood. let's just talk normally.")
+        await update.message.reply_text("failed to set the mood.")
 
 async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles /feedback [message]"""
     user_id = update.effective_user.id
     text = update.message.text.replace("/feedback", "").strip()
-
     if not text:
-        await update.message.reply_text("tell me what to improve. usage: /feedback your message here")
+        await update.message.reply_text("usage: /feedback [message]")
         return
-
     try:
-        # Save to the new 'feedback' table
         supabase.table("feedback").insert({"user_id": user_id, "content": text}).execute()
-        await update.message.reply_text("thanks. i've sent your note to my developer. 📝")
-    except Exception as e:
-        print(f"Feedback Error: {e}")
-        await update.message.reply_text("error sending feedback. try again later.")
+        await update.message.reply_text("sent. thanks. 📝")
+    except Exception:
+        await update.message.reply_text("error sending feedback.")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "commands:\n"
         "/start - wake me up\n"
-        "/date - set a romantic mood\n"
-        "/clear - forget history & restart\n"
-        "/feedback - report an issue\n"
+        "/date - set romantic mood\n"
+        "/clear - wipe memory\n"
+        "/feedback - send suggestion"
     )
     await update.message.reply_text(msg)
 
@@ -122,13 +116,10 @@ async def process_user_buffer(chat_id: int, user_id: int, context: ContextTypes.
     except Exception:
         pass
 
-    # Fetch History (INCREASED LIMIT FOR BETTER MEMORY)
+    # Fetch History (30 msg context)
     try:
-        # Changed limit from 10 to 30 to give the bot more context
         history_res = supabase.table("chat_history").select("role", "content")\
             .eq("user_id", user_id).order("id", desc=True).limit(30).execute()
-        
-        # Reverse them so they are in chronological order (oldest -> newest)
         history = [{"role": r['role'], "content": r['content']} for r in reversed(history_res.data)]
     except Exception:
         history = []
@@ -138,18 +129,18 @@ async def process_user_buffer(chat_id: int, user_id: int, context: ContextTypes.
         response = await ai_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": SYSTEM_PROMPT}] + history,
-            temperature=0.7, # Lowered slightly to make her less chaotic/hallucinating
-            max_tokens=1000
+            temperature=0.7,
+            max_tokens=150  # STRICT LIMIT to prevent long paragraphs
         )
         
         if response and response.choices:
             aisha_reply = response.choices[0].message.content
         else:
-            aisha_reply = "hmm, say that again?"
+            aisha_reply = "hmm?"
             
     except Exception as e:
         print(f"AI Error: {e}")
-        aisha_reply = "my brain is offline (error). give me a sec."
+        aisha_reply = "my brain is offline. give me a sec."
 
     # Save Assistant Msg
     try:
@@ -157,16 +148,8 @@ async def process_user_buffer(chat_id: int, user_id: int, context: ContextTypes.
     except Exception:
         pass
 
-    # Send (Burst logic)
-    if "." in aisha_reply and len(aisha_reply) > 80:
-        parts = aisha_reply.split(".", 1)
-        await context.bot.send_message(chat_id=chat_id, text=parts[0].strip() + ".")
-        await asyncio.sleep(random.uniform(0.5, 1.2))
-        await context.bot.send_chat_action(chat_id=chat_id, action=constants.ChatAction.TYPING)
-        if parts[1].strip():
-            await context.bot.send_message(chat_id=chat_id, text=parts[1].strip())
-    else:
-        await context.bot.send_message(chat_id=chat_id, text=aisha_reply)
+    # Send Single Message (Burst Logic Removed)
+    await context.bot.send_message(chat_id=chat_id, text=aisha_reply)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -191,14 +174,14 @@ async def delayed_processing(chat_id, user_id, context):
     await process_user_buffer(chat_id, user_id, context)
 
 if __name__ == "__main__":
-    print("🚀 Aisha is online (Less Emojis, Better Memory, Feedback Added).")
+    print("🚀 Aisha is online (Short Replies & Single Message Mode).")
     app = Application.builder().token(TG_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("clear", clear_command))
     app.add_handler(CommandHandler("date", date_command))
+    app.add_handler(CommandHandler("feedback", feedback_command))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("feedback", feedback_command)) # New command
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     app.run_polling()
