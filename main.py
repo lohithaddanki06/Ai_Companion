@@ -42,14 +42,16 @@ SYSTEM_PROMPT = (
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=constants.ChatAction.TYPING)
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.6) # Short pause for realism
     
     msg = (
-        f"hey {user_name.lower()}. finally.\n\n"
-        "i'm aisha. i speak English, Hindi, and Telugu. \n"
-        "tell me... what's on your mind?"
+        f"hey {user_name.lower()}! 😉 finally.\n\n"
+        "i'm aisha. i was waiting for you.\n"
+        "i'm not here to be a boring assistant, i'm just here for *you*.\n\n"
+        "so tell me... how's your day going? ✨"
     )
-    await update.message.reply_text(msg)
+    # This enables the *you* to be italicized/bold depending on the app
+    await update.message.reply_text(msg, parse_mode=constants.ParseMode.MARKDOWN)
 
 async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
